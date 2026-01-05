@@ -1,14 +1,8 @@
+# api/models/receipt.py
 from django.db import models
 from api.models.base_document import BaseDocument
-from api.models.user import User
 
 class Receipt(BaseDocument):
-    user = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name="receipts"
-    )
-
     PAYMENT_MODES = [
         ("cash", "Cash"),
         ("card", "Card"),
@@ -24,4 +18,4 @@ class Receipt(BaseDocument):
     )
 
     def __str__(self):
-        return f"Receipt - {self.merchant_name}"
+        return f"Receipt - {self.merchant_name or self.id}"

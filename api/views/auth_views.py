@@ -1,51 +1,91 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-import uuid
-
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.permissions import IsAuthenticated
 from api.models.user import User
 from api.utils.google_auth import verify_google_token
-
+from rest_framework.permissions import AllowAny
 
 class GoogleAuthView(APIView):
+    authentication_classes = [] 
+    permission_classes = [AllowAny] 
     def post(self, request):
         token = request.data.get("token")
 
         if not token:
-            return Response({"error": "Token missing"}, status=400)
+            return Response(
+                {"error": "Google token missing"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         data = verify_google_token(token)
+     
+
         if not data:
-            return Response({"error": "Invalid Google token"}, status=401)
+            return Response(
+                {"error": "Invalid Google token"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
 
-        base_username = (
-            data["full_name"]
-            .lower()
-            .replace(" ", "_")
-        )
-
-        username = base_username
-        if User.objects.filter(username=username).exists():
-            username = f"{base_username}_{uuid.uuid4().hex[:6]}"
-
-        user, created = User.objects.get_or_create(
+        user, _ = User.objects.get_or_create(
             google_id=data["google_id"],
             defaults={
                 "email": data["email"],
-                "username": username,
+                "username": data["email"],
                 "first_name": data["full_name"],
                 "avatar": data["picture"],
             }
         )
 
-        return Response({
+        refresh = RefreshToken.for_user(user)
+
+        response = Response({
             "message": "Login successful",
             "user": {
                 "id": user.id,
-                "username": user.username,
                 "email": user.email,
                 "avatar": user.avatar,
-                "new_user": created,
             }
-        }, status=200
+        })
+
+        response.set_cookie(
+            key="access",
+            value=str(refresh.access_token),
+            httponly=True,
+            secure=False,
+            samesite="Lax",
+            path="/",
         )
+        response.set_cookie(
+            key="refresh",
+            value=str(refresh),
+            httponly=True,
+            secure=False,
+            samesite="Lax",
+            path="/",
+        )
+
+        return response
+
+
+class MeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        return Response({
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "avatar": user.avatar,
+        })
+        
+class CheckAuthView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        user = request.user
+        return Response({"message": "User is authenticated"},user,
+                        status=200)
+    
