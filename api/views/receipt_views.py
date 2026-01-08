@@ -1,26 +1,139 @@
 import json
+from decimal import Decimal
 from django.http import JsonResponse
-from django.contrib.auth.decorators import login_required
-from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
+from django.db import transaction
+from django.contrib.contenttypes.models import ContentType
 from django.views import View
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from api.serializers.receipt_serializer import ReceiptSerializer
+from api.serializers.invoice_serializer import InvoiceSerializer
+from api.models.invoice import Invoice
 from api.models.receipt import Receipt
-from api.models.user import User
+from api.models.items import Item
 
-@method_decorator(csrf_exempt, name='dispatch')
-class ReceiptView(View):
-    @method_decorator(login_required)
-    def get(self, request):
-        user = request.user
-        receipts = Receipt.objects.filter(owner=user)
-        receipt_list = [
-            {
-                "id": receipt.id,
-                "merchant_name": receipt.merchant_name,
-                "amount": receipt.amount,
-                "date": receipt.date,
-                "payment_mode": receipt.payment_mode,
+
+class UpdateReceiptView(View):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, receipt_id):
+        try:
+            receipt = Receipt.objects.get(id=receipt_id, user=request.user)
+        except Receipt.DoesNotExist:
+            return JsonResponse({"error": "Receipt not found"}, status=404)
+
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+        with transaction.atomic():
+
+            #  Update receipt fields
+            allowed_fields = [
+                "merchant_name",
+                "total_amount",
+                "date",
+                "category",
+                "payment_mode",
+                "receipt_number",
+                "gst_number",
+                "currency",
+                "address",
+                "tax_amount",
+                "expense_type",
+                "is_reviewed",
+            ]
+
+            for field in allowed_fields:
+                if field in data:
+                    setattr(receipt, field, data[field])
+
+            receipt.save()
+
+            #  Handle items
+            items_payload = data.get("items", [])
+
+            ct = ContentType.objects.get_for_model(receipt)
+
+            existing_items = {
+                item.id: item
+                for item in Item.objects.filter(
+                    content_type=ct,
+                    object_id=receipt.id
+                )
             }
-            for receipt in receipts
-        ]
-        return JsonResponse({"receipts": receipt_list}, status=200)
+
+            received_item_ids = set()
+
+            for item_data in items_payload:
+                item_id = item_data.get("id")
+
+                name = item_data.get("name")
+                quantity = int(item_data.get("quantity", 1))
+                price = Decimal(item_data.get("price"))
+
+                total_price = price * quantity
+
+                if item_id and item_id in existing_items:
+                    #  Update item
+                    item = existing_items[item_id]
+                    item.name = name
+                    item.quantity = quantity
+                    item.price = price
+                    item.total_price = total_price
+                    item.save()
+
+                    received_item_ids.add(item_id)
+                else:
+                    #  Create new item
+                    item = Item.objects.create(
+                        content_type=ct,
+                        object_id=receipt.id,
+                        name=name,
+                        quantity=quantity,
+                        price=price,
+                        total_price=total_price
+                    )
+                    received_item_ids.add(item.id)
+
+            # delete removed items
+            for item_id, item in existing_items.items():
+                if item_id not in received_item_ids:
+                    item.delete()
+
+        return JsonResponse({
+            "message": "Receipt and items updated successfully"
+        })
+
+class ReceiptDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, id):
+        try:
+            receipt = Receipt.objects.get(id=id, user=request.user)
+            serializer = ReceiptSerializer(receipt)
+            return Response(serializer.data, status=200)
+        except Receipt.DoesNotExist:
+            return Response(
+                {"error": "Receipt not found"},
+                status=404
+            )
+
+class DeleteReceiptView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, receipt_id):
+        try:
+            receipt = Receipt.objects.get(id=receipt_id, user=request.user)
+            receipt.delete()
+            return Response(
+                {"message": "Receipt deleted successfully"},
+                status=200
+            )
+        except Receipt.DoesNotExist:
+            return Response(
+                {"error": "Receipt not found"},
+                status=404
+            )

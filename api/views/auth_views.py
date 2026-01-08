@@ -88,4 +88,14 @@ class CheckAuthView(APIView):
         user = request.user
         return Response({"message": "User is authenticated"},user,
                         status=200)
-    
+
+class LogoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        response = Response({"message": "Logout successful"}, status=200)
+
+        response.delete_cookie("access", path="/")
+        response.delete_cookie("refresh", path="/")
+
+        return response

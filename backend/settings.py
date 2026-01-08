@@ -42,6 +42,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "backend.middleware.iframe_media.MediaIframeMiddleware",
 ]
 
 REST_FRAMEWORK = {
@@ -64,6 +65,7 @@ SIMPLE_JWT = {
 
 
 CORS_ALLOW_CREDENTIALS = True
+X_FRAME_OPTIONS = "SAMEORIGIN"
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
