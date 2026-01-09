@@ -12,7 +12,6 @@ class OCRMetadata(models.Model):
     )
     object_id = models.PositiveIntegerField()
     document = GenericForeignKey("content_type", "object_id")
-    processed_image = models.URLField(blank=True, null=True)
     engine_used = models.CharField(
         max_length=50,
         choices=[

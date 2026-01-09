@@ -7,9 +7,11 @@ from api.models.user import User
 from api.utils.google_auth import verify_google_token
 from rest_framework.permissions import AllowAny
 
+
 class GoogleAuthView(APIView):
-    authentication_classes = [] 
-    permission_classes = [AllowAny] 
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
     def post(self, request):
         token = request.data.get("token")
 
@@ -20,8 +22,6 @@ class GoogleAuthView(APIView):
             )
 
         data = verify_google_token(token)
-     
-
         if not data:
             return Response(
                 {"error": "Invalid Google token"},
@@ -35,10 +35,12 @@ class GoogleAuthView(APIView):
                 "username": data["email"],
                 "first_name": data["full_name"],
                 "avatar": data["picture"],
+                "access_token": token
             }
         )
 
         refresh = RefreshToken.for_user(user)
+        access_token = str(refresh.access_token)
 
         response = Response({
             "message": "Login successful",
@@ -46,17 +48,20 @@ class GoogleAuthView(APIView):
                 "id": user.id,
                 "email": user.email,
                 "avatar": user.avatar,
-            }
+            },
+            "access": access_token
         })
-
+        
+        #  HttpOnly cookies 
         response.set_cookie(
             key="access",
-            value=str(refresh.access_token),
+            value=access_token,
             httponly=True,
             secure=False,
             samesite="Lax",
             path="/",
         )
+        # Refresh token cookie
         response.set_cookie(
             key="refresh",
             value=str(refresh),
@@ -80,13 +85,14 @@ class MeView(APIView):
             "email": user.email,
             "avatar": user.avatar,
         })
-        
+
+
 class CheckAuthView(APIView):
     permission_classes = [IsAuthenticated]
-    
+
     def get(self, request):
         user = request.user
-        return Response({"message": "User is authenticated"},user,
+        return Response({"message": "User is authenticated"}, user,
                         status=200)
 
 class LogoutView(APIView):

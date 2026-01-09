@@ -10,5 +10,4 @@ class OCRMetadataSerializer(serializers.ModelSerializer):
             "confidence_score",
             "raw_response",
             "created_at",
-            "processed_image",
         ]

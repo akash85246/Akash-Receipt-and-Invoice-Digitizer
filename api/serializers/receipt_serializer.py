@@ -35,6 +35,7 @@ class ReceiptSerializer(serializers.ModelSerializer):
             "expense_type",
             "items",
             "is_reviewed",
+            "processed_image",
         ]
 
     def get_items(self, obj):

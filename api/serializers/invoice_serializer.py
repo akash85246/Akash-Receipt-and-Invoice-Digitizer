@@ -38,6 +38,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "ocr_metadata",
             "items",
             "is_reviewed",
+            "processed_image",
         ]
 
     def get_type(self, obj):

@@ -1,5 +1,3 @@
-# api/utils/parsers/document_parser.py
-
 import re
 from datetime import datetime
 from decimal import Decimal
@@ -88,9 +86,7 @@ def base_document_data(text,ocr_confidence):
     Shared fields for ALL documents
     """
     text = normalize_text(text)
-    print("text in base document data:", text)
     document_total = extract_total_amount(text) or extract_subtotal(text) or Decimal("0.00")
-    
     
     return {
         "merchant_name": extract_merchant_name(text),

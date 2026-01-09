@@ -74,27 +74,27 @@ def filter_vertical_text(words, ratio=2.5):
     return filtered
 
 
-def preprocess_image(image_path: str) -> tuple[np.ndarray, str]:
-    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    img = cv2.resize(img, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-    img = cv2.fastNlMeansDenoising(img, None, 30, 7, 21)
-    img = cv2.adaptiveThreshold(
-        img, 255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY,
-        31, 2
-    )
-    os.makedirs(os.path.join(settings.MEDIA_ROOT, "processed"), exist_ok=True)
+# def preprocess_image(image_path: str) -> tuple[np.ndarray, str]:
+#     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+#     img = cv2.resize(img, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+#     img = cv2.fastNlMeansDenoising(img, None, 30, 7, 21)
+#     img = cv2.adaptiveThreshold(
+#         img, 255,
+#         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+#         cv2.THRESH_BINARY,
+#         31, 2
+#     )
+#     os.makedirs(os.path.join(settings.MEDIA_ROOT, "processed"), exist_ok=True)
 
-    filename = f"processed_{uuid.uuid4().hex}.png"
-    save_path = os.path.join(settings.MEDIA_ROOT, "processed", filename)
+#     filename = f"processed_{uuid.uuid4().hex}.png"
+#     save_path = os.path.join(settings.MEDIA_ROOT, "processed", filename)
 
-    cv2.imwrite(save_path, img)
+#     cv2.imwrite(save_path, img)
 
-    # 🔹 Return both image + URL
-    image_url = f"{settings.MEDIA_URL}processed/{filename}"
+#     # Return both image and URL
+#     image_url = f"{settings.MEDIA_URL}processed/{filename}"
 
-    return img, image_url
+#     return img, image_url
 
 def run_paddle_ocr(image_path: str):
     result = paddle_ocr.ocr(image_path)
@@ -107,7 +107,6 @@ def run_paddle_ocr(image_path: str):
 
     for line in result[0]:
         try:
-            # PaddleOCR line format (robust)
             box = line[0]
             text = line[1][0]
             conf = float(line[1][1])
@@ -121,7 +120,6 @@ def run_paddle_ocr(image_path: str):
                 confidences.append(conf)
 
         except Exception:
-            # Skip malformed lines safely
             continue
 
     avg_confidence = (
@@ -189,14 +187,13 @@ def hybrid_ocr(image_path: str):
         }
 
     # Fallback to Tesseract
-    processed_img, processed_image_url = preprocess_image(image_path)
-    texts, conf = run_tesseract(processed_img)
+    image=cv2.imread(image_path)
+    texts, conf = run_tesseract(image)
 
     return {
         "engine": "tesseract",
         "confidence": conf,
         "lines": texts,
-        "processed_image": processed_image_url
     }
 
 

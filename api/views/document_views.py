@@ -1,10 +1,11 @@
+import os
+import uuid
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.core.files import File
 from api.utils.pdf_utils import split_pdf_into_pages
-import os
 from api.models.invoice import Invoice
 from api.models.receipt import Receipt
 from api.utils.ocr import extract_text_from_file
@@ -19,9 +20,8 @@ from django.db import transaction
 from django.db.models import Q
 from pdf2image import convert_from_path
 from  api.utils.parsers.confidence import weighted_value
-
-import uuid
-
+from api.utils.ws import send_upload_event
+from api.utils.preprocess_image  import PreprocessImage
 
 def pdf_to_image(pdf_path: str, output_dir="media/tmp") -> str:
     pages = convert_from_path(
@@ -53,7 +53,14 @@ class UploadDocumentView(APIView):
         os.makedirs("media/tmp", exist_ok=True)
         results = []
 
-        for file in files:
+        for index, file in enumerate(files, start=1):
+            send_upload_event(
+                request.user.id,
+                step="upload_started",
+                message=f"Starting upload for {file.name}",
+                progress=0
+            )
+
             ext = file.name.split(".")[-1].lower()
             if ext not in self.ALLOWED_EXTENSIONS:
                 continue
@@ -61,120 +68,171 @@ class UploadDocumentView(APIView):
             filename = file.name.lower()
             doc_type = "invoice" if "invoice" in filename else "receipt"
 
-            #  Save upload temporarily
+            # Save upload temporarily
+            send_upload_event(
+                request.user.id,
+                "file_saved",
+                f"Saving {file.name}",
+                10
+            )
+
             temp_upload_path = os.path.join("media/tmp", file.name)
             with open(temp_upload_path, "wb+") as f:
                 for chunk in file.chunks():
                     f.write(chunk)
 
-            # PDF to image
+            # PDF to Image
             if ext == "pdf":
+                send_upload_event(
+                    request.user.id,
+                    "pdf_convert",
+                    "Converting PDF to image",
+                    20
+                )
                 image_path = pdf_to_image(temp_upload_path)
                 os.remove(temp_upload_path)
             else:
                 image_path = temp_upload_path
 
-            # Save image to Django model
+            # Save image to model
             with open(image_path, "rb") as img:
                 django_file = File(img, name=os.path.basename(image_path))
+                document = (
+                    Invoice.objects.create(user=request.user, image=django_file)
+                    if doc_type == "invoice"
+                    else Receipt.objects.create(user=request.user, image=django_file)
+                )
 
-                if doc_type == "invoice":
-                    document = Invoice.objects.create(
-                        user=request.user,
-                        image=django_file
-                    )
-                else:
-                    document = Receipt.objects.create(
-                        user=request.user,
-                        image=django_file
-                    )
+            # OCR
+            send_upload_event(
+                request.user.id,
+                "ocr",
+                "Running OCR on document",
+                40
+            )
+            img = PreprocessImage.preprocess_for_ocr(document.image.path)
 
-            #  OCR
-            ocr_result = extract_text_from_file(document.image.path)
-
+            ocr_result = extract_text_from_file(img)
             lines = ocr_result.get("lines", [])
             extracted_text = "\n".join(lines)
             ocr_conf = ocr_result.get("confidence")
-            
-            parsed_data = parse_document(extracted_text, doc_type, ocr_confidence=ocr_conf)
+
+            # Parsing
+            send_upload_event(
+                request.user.id,
+                "parse",
+                "Extracting structured fields",
+                60
+            )
+
+            parsed_data = parse_document(
+                extracted_text,
+                doc_type,
+                ocr_confidence=ocr_conf
+            )
 
             # Save document fields
+            document.processed_image = img
             document.extracted_text = extracted_text
             document.merchant_name = parsed_data.get("merchant_name")
-            document.total_amount = weighted_value(parsed_data.get("total_amount"),fallback=None,confidence=ocr_conf)
+            document.total_amount = weighted_value(
+                parsed_data.get("total_amount"),
+                fallback=None,
+                confidence=ocr_conf
+            )
             document.currency = parsed_data.get("currency")
             document.confidence_score = ocr_conf
             document.address = parsed_data.get("address")
-            document.tax_amount = weighted_value(parsed_data.get("tax_amount"),fallback=None,confidence=ocr_conf)
+            document.tax_amount = weighted_value(
+                parsed_data.get("tax_amount"),
+                fallback=None,
+                confidence=ocr_conf
+            )
             document.date = parsed_data.get("date")
             document.category = parsed_data.get("category")
             document.expense_type = parsed_data.get("expense_type")
             document.is_reviewed = False
             document.gst_number = parsed_data.get("gst_number")
-            
+
             if doc_type == "receipt":
                 document.receipt_number = parsed_data.get("receipt_number")
                 document.payment_mode = parsed_data.get("payment_mode")
-                
+
             if doc_type == "invoice":
                 document.invoice_number = parsed_data.get("invoice_number")
-                document.gst_number = parsed_data.get("gst_number")
                 document.due_date = parsed_data.get("due_date")
                 document.is_paid = parsed_data.get("is_paid")
 
-            
+            # Save items
+            send_upload_event(
+                request.user.id,
+                "items",
+                "Saving line items",
+                75
+            )
 
             items = parsed_data.get("items", [])
-
             content_type = ContentType.objects.get_for_model(document)
 
             with transaction.atomic():
                 document.save()
                 for item in items:
                     price = item.get("unit_price")
-                    print(price,item.get("name"),item.get("quantity"),"\n")
-                    if price is None:
-                        continue  
-                    quantity = item.get("quantity", 1)
+                    if not price:
+                        continue
+                    qty = item.get("quantity", 1)
                     Item.objects.create(
                         content_type=content_type,
                         object_id=document.id,
                         name=item.get("name"),
-                        quantity=quantity,
+                        quantity=qty,
                         price=price,
-                        total_price=price * quantity if price else None
+                        total_price=price * qty
                     )
 
             # OCR Metadata
+            send_upload_event(
+                request.user.id,
+                "metadata",
+                "Saving OCR metadata",
+                90
+            )
+
             OCRMetadata.objects.create(
-                content_type=ContentType.objects.get_for_model(document),
+                content_type=content_type,
                 object_id=document.id,
                 engine_used=ocr_result.get("engine"),
                 confidence_score=ocr_result.get("confidence"),
                 raw_response={"lines": lines},
-                processed_image=ocr_result.get("processed_image")  # ✅ safe
+            )
+
+            # Done
+            send_upload_event(
+                request.user.id,
+                "completed",
+                f"{file.name} processed successfully",
+                100
             )
 
             results.append({
                 "id": document.id,
                 "type": doc_type,
                 "filename": document.image.name,
-                "ocr_engine": ocr_result.get("engine")
+                "ocr_engine": ocr_result.get("engine"),
             })
 
-            # Cleanup temp image
             if image_path.startswith("media/tmp"):
                 os.remove(image_path)
 
         return Response(
             {
                 "message": "Documents uploaded and processed successfully",
-                "documents": results
+                "documents": results,
             },
-            status=201
+            status=201,
         )
-
-
+        
+        
 class DocumentListView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -271,5 +329,3 @@ class DeleteMultipleDocumentsView(APIView):
             {"message": "Documents deleted successfully"},
             status=200
         )
-
-

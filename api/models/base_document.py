@@ -15,6 +15,7 @@ class BaseDocument(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     tax_amount = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     expense_type = models.CharField(max_length=100, blank=True, null=True)
+    processed_image = models.URLField(blank=True, null=True)
     is_reviewed = models.BooleanField(default=False)
 
     class Meta:

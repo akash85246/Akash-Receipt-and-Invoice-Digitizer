@@ -39,11 +39,10 @@ def extract_receipt_number(text):
 def parse_receipt(text, ocr_confidence=None):
     text = normalize_text(text)
     data = base_document_data(text, ocr_confidence=None)
-    
     category = auto_classify_category(text)
     payment_mode=extract_payment_mode_with_confidence(text) or None
     data.update({
-        "payment_mode": extract_payment_mode_with_confidence(text),
+        "payment_mode": payment_mode,
         "receipt_number": extract_receipt_number(text),
         "expense_type": classify_expense_type(text, category,payment_mode,ocr_confidence),
     })
