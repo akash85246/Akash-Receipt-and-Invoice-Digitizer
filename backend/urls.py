@@ -12,7 +12,7 @@ def root_view(request):
     })
 
 urlpatterns = [
-     path("", root_view),
+    path("", root_view),
     path("admin/", admin.site.urls),
     path("api/", include("api.urls.api_urls")),
 ]

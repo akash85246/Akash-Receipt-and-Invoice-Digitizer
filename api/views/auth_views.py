@@ -6,8 +6,42 @@ from rest_framework.permissions import IsAuthenticated
 from api.models.user import User
 from api.utils.google_auth import verify_google_token
 from rest_framework.permissions import AllowAny
+from rest_framework_simplejwt.exceptions import TokenError
 
+class RefreshAccessTokenView(APIView):
+    authentication_classes = []   
+    permission_classes = [AllowAny]
 
+    def post(self, request):
+        refresh_token = request.COOKIES.get("refresh")
+
+        if not refresh_token:
+            return Response(
+                {"error": "Refresh token missing"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        try:
+            refresh = RefreshToken(refresh_token)
+            access_token = str(refresh.access_token)
+        except TokenError:
+            return Response(
+                {"error": "Invalid or expired refresh token"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        response = Response({"message": "Access token refreshed"})
+
+        response.set_cookie(
+            key="access",
+            value=access_token,
+            httponly=True,
+            secure=False,   # True in prod
+            samesite="Lax",
+            path="/",
+        )
+
+        return response
 class GoogleAuthView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -87,13 +121,6 @@ class MeView(APIView):
         })
 
 
-class CheckAuthView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        user = request.user
-        return Response({"message": "User is authenticated"}, user,
-                        status=200)
 
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]

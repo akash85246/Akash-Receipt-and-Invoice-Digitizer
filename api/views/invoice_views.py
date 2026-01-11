@@ -7,30 +7,29 @@ from django.views import View
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework import status
 from api.serializers.invoice_serializer import InvoiceSerializer
-from api.serializers.invoice_serializer import InvoiceSerializer
-from api.models.invoice import Invoice
 from api.models.invoice import Invoice
 from api.models.items import Item
 
-
-class UpdateInvoiceView(View):
+class UpdateInvoiceView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def post(self, request, invoice_id):
+    def put(self, request, invoice_id):
         try:
-            invoice = Invoice.objects.get(id=invoice_id, user=request.user)
+            invoice = Invoice.objects.get(
+                id=invoice_id,
+                user=request.user
+            )
         except Invoice.DoesNotExist:
-            return JsonResponse({"error": "Invoice not found"}, status=404)
+            return Response(
+                {"error": "Invoice not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
-        try:
-            data = json.loads(request.body)
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "Invalid JSON"}, status=400)
+        data = request.data  # DRF parses JSON
 
         with transaction.atomic():
-
-            #  Update invoice fields
             allowed_fields = [
                 "merchant_name",
                 "total_amount",
@@ -53,9 +52,8 @@ class UpdateInvoiceView(View):
 
             invoice.save()
 
-            #  Handle items
+            # ---- Items handling ----
             items_payload = data.get("items", [])
-
             ct = ContentType.objects.get_for_model(invoice)
 
             existing_items = {
@@ -71,12 +69,11 @@ class UpdateInvoiceView(View):
             for item_data in items_payload:
                 item_id = item_data.get("id")
                 name = item_data.get("name", "")
-                quantity = Decimal(item_data.get("quantity", 1))
+                quantity = int(item_data.get("quantity", 1))
                 price = Decimal(item_data.get("price", 0))
                 total_price = price * quantity
 
                 if item_id and item_id in existing_items:
-                    #  Update item
                     item = existing_items[item_id]
                     item.name = name
                     item.quantity = quantity
@@ -84,7 +81,6 @@ class UpdateInvoiceView(View):
                     item.total_price = total_price
                     item.save()
                 else:
-                    #  Create new item
                     item = Item.objects.create(
                         content_type=ct,
                         object_id=invoice.id,
@@ -96,21 +92,20 @@ class UpdateInvoiceView(View):
 
                 received_item_ids.add(item.id)
 
-            #  Delete removed items
+            # delete removed items
             for item_id, item in existing_items.items():
                 if item_id not in received_item_ids:
                     item.delete()
 
-        serialized_invoice = InvoiceSerializer(invoice)
-        return JsonResponse(serialized_invoice.data, safe=False)
-
-
+        serializer = InvoiceSerializer(invoice)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
 class InvoiceDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, invoice_id):
         try:
-            invoice = Invoice.objects.get(id=id, user=request.user)
+            invoice = Invoice.objects.get(id=invoice_id, user=request.user)
             serializer = InvoiceSerializer(invoice)
             return Response(serializer.data, status=200)
         except Invoice.DoesNotExist:

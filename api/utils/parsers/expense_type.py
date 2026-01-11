@@ -35,7 +35,7 @@ def classify_expense_type(
 
     # Payment mode hint
     if payment_mode == "cash":
-        personal_score += 1
+        personal_score += 1,
 
     # Confidence fallback
     if confidence is not None and confidence < 0.6:

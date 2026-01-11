@@ -254,6 +254,8 @@ class DocumentListView(APIView):
             receipts = Receipt.objects.none()
         elif doc_type == "receipt":
             invoices = Invoice.objects.none()
+            
+        print(doc_type, search, category, start_date, end_date, min_amount, max_amount)
 
         if search:
             invoices = invoices.filter(
@@ -284,7 +286,6 @@ class DocumentListView(APIView):
 
         documents = list(invoices) + list(receipts)
         documents.sort(key=lambda x: x.created_at, reverse=True)
-
         paginator = DocumentPagination()
         paginated_docs = paginator.paginate_queryset(documents, request)
 
@@ -294,7 +295,6 @@ class DocumentListView(APIView):
                 serialized.append(InvoiceSerializer(doc).data)
             else:
                 serialized.append(ReceiptSerializer(doc).data)
-
         return paginator.get_paginated_response(serialized)
 
 

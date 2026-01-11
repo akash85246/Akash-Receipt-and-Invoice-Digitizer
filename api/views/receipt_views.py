@@ -1,36 +1,32 @@
-import json
 from decimal import Decimal
-from django.http import JsonResponse
 from django.db import transaction
 from django.contrib.contenttypes.models import ContentType
-from django.views import View
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
+from rest_framework import status
 from rest_framework.response import Response
 from api.serializers.receipt_serializer import ReceiptSerializer
-from api.serializers.invoice_serializer import InvoiceSerializer
-from api.models.invoice import Invoice
 from api.models.receipt import Receipt
 from api.models.items import Item
 
-
-class UpdateReceiptView(View):
+class UpdateReceiptView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def post(self, request, receipt_id):
+    def put(self, request, receipt_id):
         try:
-            receipt = Receipt.objects.get(id=receipt_id, user=request.user)
+            receipt = Receipt.objects.get(
+                id=receipt_id,
+                user=request.user
+            )
         except Receipt.DoesNotExist:
-            return JsonResponse({"error": "Receipt not found"}, status=404)
+            return Response(
+                {"error": "Receipt not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
-        try:
-            data = json.loads(request.body)
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "Invalid JSON"}, status=400)
+        data = request.data 
 
         with transaction.atomic():
-
-            #  Update receipt fields
             allowed_fields = [
                 "merchant_name",
                 "total_amount",
@@ -52,9 +48,9 @@ class UpdateReceiptView(View):
 
             receipt.save()
 
-            #  Handle items
-            items_payload = data.get("items", [])
 
+            # Handle items (your logic is correct ✅)
+            items_payload = data.get("items", [])
             ct = ContentType.objects.get_for_model(receipt)
 
             existing_items = {
@@ -69,25 +65,20 @@ class UpdateReceiptView(View):
 
             for item_data in items_payload:
                 item_id = item_data.get("id")
-
                 name = item_data.get("name")
                 quantity = int(item_data.get("quantity", 1))
                 price = Decimal(item_data.get("price"))
-
                 total_price = price * quantity
 
                 if item_id and item_id in existing_items:
-                    #  Update item
                     item = existing_items[item_id]
                     item.name = name
                     item.quantity = quantity
                     item.price = price
                     item.total_price = total_price
                     item.save()
-
-                    received_item_ids.add(item_id)
+                    
                 else:
-                    #  Create new item
                     item = Item.objects.create(
                         content_type=ct,
                         object_id=receipt.id,
@@ -96,23 +87,23 @@ class UpdateReceiptView(View):
                         price=price,
                         total_price=total_price
                     )
-                    received_item_ids.add(item.id)
+                    
+                received_item_ids.add(item.id)
 
-            # delete removed items
             for item_id, item in existing_items.items():
                 if item_id not in received_item_ids:
                     item.delete()
-
-        return JsonResponse({
-            "message": "Receipt and items updated successfully"
-        })
-
+        serializer = ReceiptSerializer(receipt)
+        
+        return Response(serializer.data, status=status.HTTP_200_OK)
+            
+        
 class ReceiptDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get(self, request, id):
+    def get(self, request, receipt_id):
         try:
-            receipt = Receipt.objects.get(id=id, user=request.user)
+            receipt = Receipt.objects.get(id=receipt_id, user=request.user)
             serializer = ReceiptSerializer(receipt)
             return Response(serializer.data, status=200)
         except Receipt.DoesNotExist:
