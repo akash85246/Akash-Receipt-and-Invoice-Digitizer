@@ -53,12 +53,32 @@ class UploadDocumentView(APIView):
         os.makedirs("media/tmp", exist_ok=True)
         results = []
 
-        for index, file in enumerate(files, start=1):
+        total_files = len(files)
+        file_weight = 100 / total_files
+        completed_files = 0
+
+        def emit_progress(step, message, file_progress):
+            """
+            Convert per-file progress (0–100)
+            into global progress (0–100)
+            """
+            global_progress = (
+                completed_files * file_weight
+                + (file_progress / 100) * file_weight
+            )
+
             send_upload_event(
                 request.user.id,
-                step="upload_started",
-                message=f"Starting upload for {file.name}",
-                progress=0
+                step=step,
+                message=message,
+                progress=round(global_progress, 2)
+            )
+
+        for file in files:
+            emit_progress(
+                "upload_started",
+                f"Starting upload for {file.name}",
+                0
             )
 
             ext = file.name.split(".")[-1].lower()
@@ -69,8 +89,7 @@ class UploadDocumentView(APIView):
             doc_type = "invoice" if "invoice" in filename else "receipt"
 
             # Save upload temporarily
-            send_upload_event(
-                request.user.id,
+            emit_progress(
                 "file_saved",
                 f"Saving {file.name}",
                 10
@@ -83,8 +102,7 @@ class UploadDocumentView(APIView):
 
             # PDF to Image
             if ext == "pdf":
-                send_upload_event(
-                    request.user.id,
+                emit_progress(
                     "pdf_convert",
                     "Converting PDF to image",
                     20
@@ -104,22 +122,21 @@ class UploadDocumentView(APIView):
                 )
 
             # OCR
-            send_upload_event(
-                request.user.id,
+            emit_progress(
                 "ocr",
                 "Running OCR on document",
                 40
             )
-            img = PreprocessImage.preprocess_for_ocr(document.image.path)
 
+            img = PreprocessImage.preprocess_for_ocr(document.image.path)
             ocr_result = extract_text_from_file(img)
+
             lines = ocr_result.get("lines", [])
             extracted_text = "\n".join(lines)
             ocr_conf = ocr_result.get("confidence")
 
             # Parsing
-            send_upload_event(
-                request.user.id,
+            emit_progress(
                 "parse",
                 "Extracting structured fields",
                 60
@@ -164,8 +181,7 @@ class UploadDocumentView(APIView):
                 document.is_paid = parsed_data.get("is_paid")
 
             # Save items
-            send_upload_event(
-                request.user.id,
+            emit_progress(
                 "items",
                 "Saving line items",
                 75
@@ -191,8 +207,7 @@ class UploadDocumentView(APIView):
                     )
 
             # OCR Metadata
-            send_upload_event(
-                request.user.id,
+            emit_progress(
                 "metadata",
                 "Saving OCR metadata",
                 90
@@ -202,16 +217,17 @@ class UploadDocumentView(APIView):
                 content_type=content_type,
                 object_id=document.id,
                 engine_used=ocr_result.get("engine"),
-                confidence_score=ocr_result.get("confidence"),
+                confidence_score=ocr_conf,
                 raw_response={"lines": lines},
             )
 
-            # Done
-            send_upload_event(
-                request.user.id,
-                "completed",
+            # File completed
+            completed_files += 1
+
+            emit_progress(
+                "file_completed",
                 f"{file.name} processed successfully",
-                100
+                95
             )
 
             results.append({
@@ -224,6 +240,14 @@ class UploadDocumentView(APIView):
             if image_path.startswith("media/tmp"):
                 os.remove(image_path)
 
+        # Final completion 
+        send_upload_event(
+            request.user.id,
+            step="all_completed",
+            message="All documents processed successfully",
+            progress=100
+        )
+
         return Response(
             {
                 "message": "Documents uploaded and processed successfully",
@@ -231,8 +255,7 @@ class UploadDocumentView(APIView):
             },
             status=201,
         )
-        
-        
+             
 class DocumentListView(APIView):
     permission_classes = [IsAuthenticated]
 
